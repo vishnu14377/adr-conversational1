@@ -1,0 +1,44 @@
+flowchart LR
+
+    subgraph Capture["  📡  What We Capture  ·  Every Conversation  "]
+        direction TB
+        S1["⏱️  Pipeline Node Latency\nPer-node timing breakdown\nLoad · Semantic Cache · Route\nTranslate · Validate · Execute"]
+        S2["💰  AI Token Usage and Cost\nGemini Flash — routing + translation\nContext cache vs uncached tokens\nCost per question · monthly forecast"]
+        S3["🗄️  Which Database Answered\nMongoDB  or  BigQuery\nQuery type and collection\nBytes scanned for BigQuery"]
+        S4["🔍  Cache Performance\nExact hash hit rate\nSemantic similarity hit rate\nTokens saved · dollars saved\nEmbedding cost per request"]
+        S5["🎯  Confidence Level + Tier\nConfident  or  Uncertain\ntier = flash | pro\nPro escalation rate (3–12% band)\nUncertain banner frequency"]
+        S6["👍  User Feedback\nThumbs up  ·  Thumbs down\nLinked to trace by trace ID\nFeeds SME review queue"]
+        S7["🔒  Security Events\nGate blocks and violations\nSecurity alerts raised\nPHI events and scope blocks"]
+        S8["📊  Accuracy Check Results\nAccuracy check pass vs mismatch\nRepair attempts and outcomes\nValidator stage breakdown"]
+    end
+
+    subgraph Store["  🗃️  Where It Goes  "]
+        direction TB
+        CloudTrace["🔍  Cloud Trace\n─────────────────────────────\nStep-by-step pipeline node log\nEvery node is a traced span\n30-day retention  ·  No PHI stored"]
+        CloudMonitor["📊  Cloud Monitoring\n─────────────────────────────\nReal-time metrics and SLOs\nLatency  ·  Error rate  ·  Cache rate\nCost tracking per conversation"]
+        BigQueryAudit["📋  BigQuery Audit Log\n─────────────────────────────\n6-year retention (45 CFR 164.530(j))\nPHI-safe fields only\nAuthoritative compliance trail\nFailed inserts → Cloud SQL audit_dead_letter\ndrained by CronJob every 5 min"]
+    end
+
+    subgraph Display["  📺  Who Sees It  ·  Grafana Dashboards  "]
+        direction TB
+        Engineering["⚙️  Engineering\n──────────────────────────\nLatency per pipeline node\nError rate and gate fires\nSemantic vs exact cache hit rate\nRepair loop count"]
+        Product["📱  Product\n──────────────────────────\nActive users per week\nTop questions asked\nUser satisfaction score\nMongoDB vs BigQuery split"]
+        Business["💼  Business\n──────────────────────────\nCost per question\nContext cache savings in dollars\nSemantic cache savings in dollars\nMonthly Flash spend forecast"]
+        Security["🛡️  Security and Compliance\n──────────────────────────\nGate violations and alerts\nPHI block events\nAudit access log\nHIPAA compliance view"]
+    end
+
+    Capture --> Store --> Display
+
+    CloudMonitor -- "🚨  P1 Alert\nSecurity gate violation\nor SLO breach detected" --> Alert(["📧  Cloud Monitoring Alert\nEmail or SMS notification\nOn-call team notified"])
+
+    classDef captureStyle fill:#EBF2FF,stroke:#0052CC,color:#172B4D
+    classDef newSignalStyle fill:#EAE6FF,stroke:#5243AA,color:#172B4D
+    classDef storeStyle fill:#F4F5F7,stroke:#6B778C,color:#172B4D
+    classDef dashStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+    classDef alertStyle fill:#FFEBE6,stroke:#DE350B,color:#172B4D
+
+    class S1,S2,S3,S5,S6,S7 captureStyle
+    class S4,S8 newSignalStyle
+    class CloudTrace,CloudMonitor,BigQueryAudit storeStyle
+    class Engineering,Product,Business,Security dashStyle
+    class Alert alertStyle

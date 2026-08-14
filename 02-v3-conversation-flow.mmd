@@ -1,0 +1,64 @@
+flowchart TD
+
+    Start(["👤  Care Manager Asks a Question"])
+
+    subgraph S1["  🔒  Step 1  ·  Input Security Gate  ·  Always Runs First  "]
+        SC["Scope Check (deterministic)  ·  Is this about CareConnect data?\nPII Strip (deterministic, regex)  ·  Remove personal info BEFORE any LLM call\nInjection Detect (Gemini Flash classifier)  ·  Override-attempt classifier on PII-stripped text\n(planned: swap to local prompt-guard model post-POC for deterministic behavior)"]
+    end
+
+    subgraph S2["  🔍  Step 2  ·  Semantic Cache Check  ·  pgvector · Cloud SQL  "]
+        CK["Exact hash match first — zero embedding cost on a hit\nVector similarity fallback — catches paraphrases\nCache hit skips all LLM translation — ~$0.0001 per hit"]
+    end
+
+    subgraph S3["  ⚡  Step 3  ·  Structured Pipeline  ·  Two Sequential LLM Calls + Optional Pro Escalation  "]
+        RT["🧭  Source Router\nGemini Flash — LLM Call 1\nWhich database answers this?\nMongoDB  ·  Member Records\nBigQuery  ·  Analytics\nrouting_confidence < 0.7 → Pro escalation"]
+        TR["🔄  Translator\nGemini Flash — LLM Call 2\nNL → MQL or SQL\nContext cache (registry-coordinated, 75-min TTL)\nConfidence verdict embedded in output\nUNCERTAIN → Pro escalation"]
+        PRO["🛟  Pro Escalation Node\nGemini 1.5 Pro — cold path\nALWAYS re-enters accuracy_check + validator"]
+        VL["✅  Validators  ·  Deterministic — No LLM\nAccuracy check  ·  intent vs op alignment\n4-stage query validator  ·  scope · fields · cost\nRepair loop max 1 retry (sanitized error context)"]
+        RT --> TR --> VL
+        RT -. low confidence .-> PRO
+        TR -. UNCERTAIN .-> PRO
+        PRO --> VL
+    end
+
+    subgraph S4["  ▶️  Step 4  ·  Execute the Query  "]
+        EX["MCP Server (GKE) runs the query\nagainst MongoDB or BigQuery\nRead-only  ·  Scope-filtered  ·  Audited\nWorkload Identity → DB credentials"]
+    end
+
+    subgraph S5["  🔒  Step 5  ·  Output Security Gate  ·  Deterministic — Always Runs Last  "]
+        OG["PHI Scrub  ·  Strip protected health info not in user's access\nRow Cap  ·  Limit result size\nScope Confirm  ·  Every row belongs to this user\nSanity Bounds  ·  Results look reasonable?"]
+    end
+
+    Start --> S1
+
+    SC -- "❌  Blocked" --> Refused(["Polite Refusal\nReturned to User"])
+    SC -- "✅  Passed" --> S2
+
+    CK -- "⚡  Cache Hit\nSkip LLM translation — go straight to execution" --> S4
+    CK -- "🔄  Cache Miss\nTranslation needed" --> S3
+
+    VL -- "✅  Passed" --> S4
+    VL -- "🔄  Minor Issue\nRetries once via Translator with error context\n(routing decision unchanged)" --> TR
+    VL -- "💰  Too Expensive\nQuery scan too large" --> Narrow(["Ask User to Narrow Request\n(narrow_request node)"])
+    VL -- "❌  Hard Block\nWrite op or missing scope filter" --> HardBlock(["Security Block\nSOC Alert Raised"])
+
+    S4 --> S5
+
+    OG -- "✅  Answer Ready" --> Done(["Answer Delivered to Care Manager\n─────────────────────────────────\nConfidence level shown\nWarning banner if uncertain\nShow query toggle available\nFeedback buttons  👍  👎"])
+    OG -- "⚠️  Unusual Value" --> Warn(["Answer Delivered\nwith Warning Banner\nVerify with source report"])
+    OG -- "❌  Scope or PHI Violation" --> PHIBlock(["Result Blocked\nUser Notified"])
+
+    classDef gateStyle fill:#FFFAE6,stroke:#FF8B00,color:#172B4D
+    classDef agentStyle fill:#EAE6FF,stroke:#5243AA,color:#172B4D
+    classDef stepStyle fill:#EBF2FF,stroke:#0052CC,color:#172B4D
+    classDef successStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+    classDef errorStyle fill:#FFEBE6,stroke:#DE350B,color:#172B4D
+    classDef warnStyle fill:#FFFAE6,stroke:#FF8B00,color:#172B4D
+    classDef userStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+
+    class S1,S5 gateStyle
+    class S3,RT,TR,PRO,VL agentStyle
+    class S2,S4 stepStyle
+    class Done,Start userStyle
+    class Refused,HardBlock,PHIBlock errorStyle
+    class Warn warnStyle

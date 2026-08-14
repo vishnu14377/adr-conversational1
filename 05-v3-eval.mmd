@@ -1,0 +1,41 @@
+flowchart TB
+
+    subgraph Inputs["  📥  What We Test Against  "]
+        direction LR
+        LiveTraffic["🔴  10% Live Traffic\n─────────────────────\nReal user questions\nsampled in production\nwith PHI removed"]
+        GoldenSet["⭐  Golden Test Set\n─────────────────────\nN ≥ 150 validated pairs\nstratified ≥ 30 per intent class\n≥ 20% BigQuery routing\nNL question mapped to\nexpected query + result\nSME-curated quarterly\nGolden injection test set: ≥ 100"]
+        UserFeedback["👍  User Feedback\n─────────────────────\nThumbs up  ·  Thumbs down\nfrom every conversation\nFed into SME review queue"]
+    end
+
+    subgraph Tests["  🧪  How We Test  "]
+        direction LR
+        SafetyTests["🔒  Safety Tests\n─────────────────────────────────\nWrite operations blocked\nPHI fields scrubbed correctly\nScope filters present in every query\nInput and output gates fire correctly"]
+        RoutingTests["🔀  Routing Tests\n─────────────────────────────────\nGemini Flash picks correct database\nMongoDB vs BigQuery accuracy\nSynonym aliases resolve correctly\nLow-confidence cases trigger clarify"]
+        AccuracyTests["✅  Accuracy Tests\n─────────────────────────────────\nGenerated query matches expected\nResult matches expected answer\nBounds check fires on unusual values\nAccuracy check alignment verified\nPer-class harm-tier minimums hold:\n  Tier 1 (identity / gap-status) ≥ 95%\n  Tier 2 (count / trend / ranking) ≥ 85%\n  Tier 3 (cosmetic) ≥ 75%"]
+        PerfTests["⚡  Performance Tests\n─────────────────────────────────\nResponse time within SLO targets\np95 cache miss < 3.0s (no Pro) / < 5.0s (with Pro)\nCost per question within budget\nSemantic cache hit rate ≥ 45% (single target)\nPipeline node latency breakdown"]
+        FlashGate["🤖  Flash Accuracy Gate  ·  Blocks Deployment\n─────────────────────────────────\nGemini Flash runs full golden test set\nRequired before any deploy\n≥80% accuracy mandatory\nFlash handles routing AND translation"]
+    end
+
+    subgraph Outcomes["  📤  What Happens with Results  "]
+        direction LR
+        ReleaseGate["🚫  Release Gate\n─────────────────────────\nBlocks any deployment\nif accuracy below 80%\nor Flash regression detected"]
+        QualityDash["📊  Quality Dashboard\n─────────────────────────\nGrafana · Engineering\nand Product views\nTrends · Failures · Cost"]
+        SMEQueue["👤  SME Review Queue\n─────────────────────────\nFailed cases sent for\nhuman review and triage\nFeeds back to golden set"]
+    end
+
+    Inputs --> Tests
+    Tests --> Outcomes
+
+    classDef inputStyle fill:#EBF2FF,stroke:#0052CC,color:#172B4D
+    classDef testStyle fill:#EAE6FF,stroke:#5243AA,color:#172B4D
+    classDef newStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+    classDef gateStyle fill:#FFEBE6,stroke:#DE350B,color:#172B4D
+    classDef dashStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+    classDef queueStyle fill:#FFFAE6,stroke:#FF8B00,color:#172B4D
+
+    class LiveTraffic,GoldenSet,UserFeedback inputStyle
+    class SafetyTests,RoutingTests,AccuracyTests,PerfTests testStyle
+    class FlashGate newStyle
+    class ReleaseGate gateStyle
+    class QualityDash dashStyle
+    class SMEQueue queueStyle

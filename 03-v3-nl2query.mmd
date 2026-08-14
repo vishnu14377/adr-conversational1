@@ -1,0 +1,68 @@
+flowchart LR
+
+    Question(["💬  Natural Language\nQuestion"])
+
+    Normalize["📖  Normalize Clinical Terms\nSchema Registry maps shorthand\nAWV → annual_wellness_visit\nA1C → hemoglobin_a1c"]
+
+    subgraph CacheLayer["  🔍  Semantic Cache  ·  pgvector · Cloud SQL  "]
+        direction TB
+        ExactCheck{"🔑  Exact Match\nhash(PII-stripped normalized question\n  + schema_version + bounds_version)"}
+        VecCheck{"🔎  Vector Similarity\ntext-embedding-004 (embedded in load_context)\nORDER BY embedding <=> :q ASC LIMIT 1\nfilter (1 - distance) ≥ 0.95 in Python\n(HNSW-index-accelerated)"}
+        ExactCheck -- "Miss" --> VecCheck
+    end
+
+    Question --> Normalize --> ExactCheck
+
+    ExactCheck -- "✅  Exact Hit\nZero embedding cost" --> Execute
+    VecCheck -- "✅  Semantic Hit\nParaphrase matched" --> Execute
+
+    subgraph LLMPipeline["  ⚡  Two Sequential LLM Calls  ·  Gemini Flash  ·  Google AI API  "]
+        direction TB
+
+        RouteStep["🧭  Source Router\n──────────────────\nGemini Flash — LLM Call 1\nClassifies which data source\nanswers this question\nMongoDB  or  BigQuery\n~$0.00018 per call"]
+
+        subgraph TranslateStep["  🔄  Translator  ·  Gemini Flash — LLM Call 2  ·  Google AI API Context Cache  "]
+            direction LR
+            CachedCtx["📦  Cached Context\n─────────────────\nSystem prompt\nFull schema\n50 few-shot examples\n~15,000 tokens\nCache-read rate\n75% cheaper than uncached\ngoogle.generativeai.caching"]
+            DynInput["💬  Dynamic Input\n───────────────────\nUser question\nSession context\n~2,000 tokens\nStandard rate"]
+            QueryOut["📄  Output\n──────────────\nMQL pipeline\nor SQL query\nConfidence verdict\nembedded — no\nextra LLM call"]
+            CachedCtx & DynInput --> QueryOut
+        end
+
+        AccuracyCheck["🎯  Accuracy Check  ·  Deterministic\n─────────────────────────────\nIntent matches operation type?\nSchema and collection aligned?\nExpected fields present?"]
+
+        ValidateStep["✅  Query Validator  ·  Deterministic  ·  4 Stages\n─────────────────────────────\nStage 1  ·  Write-op guard\nStage 2  ·  Scope filter present?\nStage 3  ·  Fields in Schema Registry?\nStage 4  ·  Query cost acceptable?"]
+
+        RouteStep --> TranslateStep --> AccuracyCheck --> ValidateStep
+    end
+
+    VecCheck -- "🔄  Cache Miss\nTranslation required" --> RouteStep
+
+    ValidateStep -- "✅  Passed" --> Execute["▶️  Execute Query\nMCP Server  ·  GKE\n──────────────────────\nMongoDB  ·  Member Records\nBigQuery  ·  Analytics\nRead-only  ·  Scope-filtered\nWorkload Identity for DB auth"]
+    ValidateStep -- "🔄  Repairable (Flash tier)\nRetries once via Translator\nwith SANITIZED error context\n(no row data in repair prompt;\n  routing decision unchanged)" --> TranslateStep
+    ValidateStep -- "🛟  Repairable (Pro tier) or\nFlash repair budget exhausted" --> ProEscalation(["Pro Escalation Node\nGemini 1.5 Pro · cold path\nthen back to Accuracy Check"])
+    ValidateStep -- "💰  Too Expensive\nQuery scan exceeds budget" --> Narrow(["📝  Narrow Request\nUser asked to filter\nmore tightly"])
+    ValidateStep -- "❌  Hard Block\nWrite op or missing\nscope filter detected" --> Blocked(["🚫  Query Blocked\nSecurity Alert Raised\nAudit Log Written"])
+    RouteStep -- "🛟  routing_confidence < 0.7\nPro escalation (skip Flash translate)" --> ProEscalation
+    TranslateStep -- "🛟  confidence_verdict = UNCERTAIN\nPro escalation" --> ProEscalation
+    ProEscalation --> AccuracyCheck
+
+    Execute --> Results(["📊  Results Returned\nto Output Security Gate"])
+    Execute -- "✅  Save to cache\nwith question embedding\n24h TTL" --> ExactCheck
+
+    classDef agentStyle fill:#EAE6FF,stroke:#5243AA,color:#172B4D
+    classDef cacheStyle fill:#FFFAE6,stroke:#FF8B00,color:#172B4D
+    classDef aiStyle fill:#EAE6FF,stroke:#5243AA,color:#172B4D
+    classDef processStyle fill:#EBF2FF,stroke:#0052CC,color:#172B4D
+    classDef successStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+    classDef errorStyle fill:#FFEBE6,stroke:#DE350B,color:#172B4D
+    classDef infraStyle fill:#F4F5F7,stroke:#6B778C,color:#172B4D
+    classDef userStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+
+    class LLMPipeline,TranslateStep agentStyle
+    class ExactCheck,VecCheck cacheStyle
+    class RouteStep,AccuracyCheck,ValidateStep,CachedCtx,DynInput,QueryOut aiStyle
+    class Normalize processStyle
+    class Results,Question userStyle
+    class Blocked errorStyle
+    class Execute infraStyle

@@ -1,0 +1,61 @@
+flowchart LR
+
+    Developer(["👨‍💻  Developer\nSubmits Code"])
+
+    subgraph AutoChecks["  🔍  Automated Quality Checks  "]
+        direction TB
+        CodeScan["🔎  Code Scan\nLint  ·  Unit Tests\nDependency audit\nContainer build"]
+        SecGate["🔒  Security Gate\n──────────────────────────────\nScope filter enforcement test\nPHI scrub compliance test\nInput + output gate fire test\nMust pass — blocks merge if failed"]
+        EvalGate["✅  Quality Gate\n──────────────────────────────\n80% accuracy on golden test set\nFlash routing + translation quality\nCost per question within budget\nMust pass — blocks merge if failed"]
+        CodeScan --> SecGate --> EvalGate
+    end
+
+    subgraph GoogleAISetup["  🤖  Google AI API Setup  ·  New in V3  "]
+        direction TB
+        ModelCreds["🔑  Model Credentials\nGemini Flash provisioned\nfor routing and translation\nvia Secret Manager"]
+        CacheWarm["📦  Context Cache Warm-Up\nMQL + SQL caches via google.generativeai.caching\n2 × 15K tokens cached, 75-min TTL\nDeploy-time + every 45 min via K8s CronJob\n(45/75 = 30-min overlap; hourly would leave a jitter gap)\nWrites active cache_name to context_cache_registry\nDeletes superseded caches one TTL after rotation\nAlso refreshed on schema or few-shots push"]
+        pgvectorInit["🔎  pgvector Initialization\nEnsure VECTOR extension active\nHNSW index on translation_cache\nDELETE stale rows on schema/bounds bump"]
+        ModelCreds --> CacheWarm --> pgvectorInit
+    end
+
+    subgraph ReleasePipeline["  🚀  Release Pipeline  "]
+        direction LR
+        Artifact["📦  Signed Artifacts\nAgent container · GKE\nMCP container · GKE\nContext cache ID · Prompt version\n14-day rollback window"]
+        Staging["🧪  Staging\nInternal team testing\nReal Google AI API calls\nReal Cloud SQL data"]
+        Canary["🕯️  Canary Release\n10% of traffic\n     ↓\n50% of traffic\n     ↓\n100% of traffic"]
+        Artifact --> Staging --> Canary
+    end
+
+    subgraph DeployTargets["  🎯  Production Deploy Targets  ·  GKE Cluster  "]
+        direction TB
+        GKEAgent["⚙️  GKE  ·  LangGraph Agent  ·  us-east4\nFastAPI · HPA on QPS · Deployment\nreadinessProbe / livenessProbe on /healthz\nminReadySeconds: 15  ·  lifespan SIGTERM drain (10s)\nSame cluster as MCP Server  ·  Monitored by SLOs"]
+        GKEMCP["⚙️  GKE  ·  MCP Server  ·  us-east4\nWorkload Identity → BigQuery (Atlas via Secret Manager)\nHPA on QPS · Keep-alive pool · mTLS to agent\nreadinessProbe / livenessProbe on /healthz"]
+        GKEAgent -. " cluster-internal traffic · K8s Service DNS " .-> GKEMCP
+    end
+
+    Developer --> AutoChecks
+
+    SecGate -- "❌  Security failure" --> SecBlock(["🚫  Merge Blocked\nSecurity failure report\nTeam notified"])
+    EvalGate -- "❌  Accuracy regression" --> EvalBlock(["🚫  Merge Blocked\nRegression report sent\nSME queue notified"])
+    EvalGate -- "✅  All gates passed" --> GoogleAISetup
+    GoogleAISetup --> ReleasePipeline
+    Canary --> DeployTargets
+
+    GKEAgent -. "🔄  Rollback to prior pod image\nwithin 5 min on SLO breach" .-> Artifact
+    GKEMCP -. "🔄  Rollback to prior pod image\nwithin 5 min on SLO breach" .-> Artifact
+
+    classDef checkStyle fill:#EBF2FF,stroke:#0052CC,color:#172B4D
+    classDef gateStyle fill:#FFFAE6,stroke:#FF8B00,color:#172B4D
+    classDef newStyle fill:#EAE6FF,stroke:#5243AA,color:#172B4D
+    classDef releaseStyle fill:#EBF2FF,stroke:#0052CC,color:#172B4D
+    classDef successStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+    classDef errorStyle fill:#FFEBE6,stroke:#DE350B,color:#172B4D
+    classDef userStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+
+    class AutoChecks checkStyle
+    class SecGate,EvalGate gateStyle
+    class GoogleAISetup,ModelCreds,CacheWarm,pgvectorInit newStyle
+    class CodeScan,Artifact,Staging,Canary releaseStyle
+    class GKEAgent,GKEMCP successStyle
+    class SecBlock,EvalBlock errorStyle
+    class Developer userStyle

@@ -1,0 +1,92 @@
+flowchart LR
+
+    CareManager([" 👤 Care Manager "])
+
+    subgraph Portal["  🌐  CareConnect Portal  "]
+        ChatUI["Chat Window\n─────────────────\nPortal Gateway\nJWT Authentication"]
+    end
+
+    subgraph AgentV3["  🤖  CareConnect Query Agent  ·  V3  ·  GKE  ·  LangGraph Structured Pipeline  "]
+        direction TB
+
+        InputGate["🔒  Input Security Gate\n─────────────────────────\nScope Check  ·  Injection Detect  ·  PII Strip\nDeterministic — Runs Before Agent Every Time"]
+
+        subgraph Pipeline["  ⚡  Structured Pipeline  ·  Explicit Named Nodes  ·  No Reasoning Overhead  "]
+            direction LR
+            ToolA["📂  Load Context\nSession History"]
+            ToolB["🔍  Semantic Cache Check\nExact hash first\nVector similarity fallback\npgvector · Cloud SQL"]
+            ToolC["🧭  Source Router\nGemini Flash — LLM Call 1\nMongoDB or BigQuery?\nrouting_confidence < 0.7 → Pro escalation"]
+            ToolD["🔄  Translator\nGemini Flash — LLM Call 2\nNL → MQL or SQL\nContext cache (registry-coordinated)\nconfidence_verdict embedded\nUNCERTAIN → Pro escalation"]
+            ToolDP["🛟  Pro Escalation Node\nGemini 1.5 Pro — cold path (~$0.024/call)\nSame translator interface\nALWAYS routes through accuracy_check + validator\n(escalation bypasses no safety control)"]
+            ToolE["✅  Validators\nAccuracy check\n4-stage query validator"]
+            ToolF["▶️  MCP Executor\nRead-only · Scope-filtered"]
+        end
+
+        OutputGate["🔒  Output Security Gate\n──────────────────────────\nPHI Scrub  ·  Row Cap  ·  Scope Confirm\nDeterministic — Runs After Agent Every Time"]
+
+        AuditNode["📝  Audit Node\nBigQuery Audit Log  ·  Cloud Monitoring\nRuns on Every Outcome"]
+
+        InputGate --> Pipeline
+        Pipeline --> OutputGate
+        OutputGate --> AuditNode
+    end
+
+    subgraph DataSources["  🗄️  Data Sources  "]
+        MongoDB[("MongoDB\nMember Records\nOperational Data")]
+        BigQuery[("BigQuery\nAnalytics\nAggregates")]
+    end
+
+    subgraph SupportingServices["  ⚙️  Supporting Services  "]
+        direction TB
+        CloudSQL[("Cloud SQL  PostgreSQL\nSession Store  ·  Semantic Cache  ·  pgvector\nLangGraph Checkpoints")]
+        Registries[("Schema Registry\nBounds Registry\nGit-Versioned  ·  Hot-Reload")]
+        GoogleAI["Google AI Generative API  ·  us-central1\nGemini Flash (router, translator, injection-detect)\nGemini 1.5 Pro (escalation tier)\nContext Cache — 75% Token Saving\ngoogle.generativeai.caching\n(BAA path handled separately by Legal/Compliance)"]
+        MCPServer["MCP Server  ·  GKE\nDatabase Execution Layer\nWorkload Identity → MongoDB / BigQuery\nLLM Never Touches DB Directly"]
+    end
+
+    subgraph FutureAgents["  🔗  Future Agent Connections  ·  Plug in via Subgraph or Tool Interface  "]
+        direction LR
+        NotifAgent["Notification\nAgent"]
+        EscalAgent["Escalation\nAgent"]
+        AnalytAgent["Analytics\nAgent"]
+        SupervAgent["Supervisor\nAgent"]
+    end
+
+    CareManager -- " asks question " --> ChatUI
+    ChatUI -- " authenticated request " --> InputGate
+    InputGate -- " blocked " --> Refused(["❌  Polite Refusal\nReturned to User"])
+
+    ToolA -. session .-> CloudSQL
+    ToolB -. cache lookup .-> CloudSQL
+    ToolC -. LLM Call 1 .-> GoogleAI
+    ToolD -. LLM Call 2 .-> GoogleAI
+    ToolD -. schema .-> Registries
+    ToolE -. ACL .-> Registries
+    ToolF -. execute .-> MCPServer
+    MCPServer --> MongoDB
+    MCPServer --> BigQuery
+
+    AuditNode -- " answer " --> ChatUI
+    ChatUI -- " answer " --> CareManager
+
+    AgentV3 -. " as_subgraph  or  as_tool " .-> FutureAgents
+
+    classDef portalStyle fill:#EBF2FF,stroke:#0052CC,color:#172B4D
+    classDef gateStyle fill:#FFFAE6,stroke:#FF8B00,color:#172B4D
+    classDef agentStyle fill:#EAE6FF,stroke:#5243AA,color:#172B4D
+    classDef toolStyle fill:#EBF2FF,stroke:#0052CC,color:#172B4D
+    classDef dataStyle fill:#E6FCFF,stroke:#008DA6,color:#172B4D
+    classDef infraStyle fill:#F4F5F7,stroke:#6B778C,color:#172B4D
+    classDef errorStyle fill:#FFEBE6,stroke:#DE350B,color:#172B4D
+    classDef futureStyle fill:#FAFBFC,stroke:#B3BAC5,color:#6B778C
+    classDef userStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+
+    class ChatUI portalStyle
+    class InputGate,OutputGate gateStyle
+    class AuditNode agentStyle
+    class ToolA,ToolB,ToolC,ToolD,ToolE,ToolF toolStyle
+    class MongoDB,BigQuery dataStyle
+    class CloudSQL,Registries,GoogleAI,MCPServer infraStyle
+    class Refused errorStyle
+    class NotifAgent,EscalAgent,AnalytAgent,SupervAgent futureStyle
+    class CareManager userStyle

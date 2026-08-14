@@ -1,0 +1,65 @@
+flowchart LR
+
+    Incoming(["💬  Question\nReceived"])
+    Incoming --> Gate1
+
+    subgraph Gate1["  🔒  Input Security Gate  ·  Graph-level node — agent cannot skip this  "]
+        direction TB
+        G1A["🔍  Scope Check (deterministic)\nIs this question about CareConnect data?\nOut-of-scope → refusal"]
+        G1C["🧹  PII Strip (deterministic, regex)\nRemove personal identifiers from\nquestion text BEFORE any LLM call"]
+        G1B["🛡️  Injection Check\nGemini Flash classifier on PII-stripped text\n(probabilistic — false-neg ≤ 1%)\nFuture: local prompt-guard-86m → deterministic\nDetected → security alert"]
+        G1A --> G1C --> G1B
+    end
+
+    subgraph PipelineGuards["  ⚡  Structured Pipeline — Validation Nodes  ·  Deterministic — No LLM Reasoning  "]
+        direction TB
+        AG1["🚫  Read-Only Enforcement\nNo write · delete · alter\noperations permitted\nHard block on detection"]
+        AG2["🔑  User Scope Filter\nEvery query must include\nthe user's ID\nMissing filter → hard block"]
+        AG3["📋  Allowed Fields Check\nAll query fields must exist\nin the Schema Registry\nHallucinated field → repair"]
+        AG4["💰  Cost Estimate\nQuery dry-run cost check\nToo expensive → ask user\nto narrow the request"]
+        AG5["🎯  Accuracy Check\nIntent matches operation type\nSchema and collection aligned\nExpected fields present"]
+        AG5 --> AG1 --> AG2 --> AG3 --> AG4
+    end
+
+    subgraph Gate2["  🔒  Output Security Gate  ·  Deterministic Node — Agent Cannot Skip This  "]
+        direction TB
+        OG1["🏥  PHI Scrub\nStrip protected health info\nnot in user's access level\nApplied to every result row"]
+        OG2["📏  Row Cap\n100 rows for ad-hoc queries\n1,000 rows for export requests\nExcess rows truncated silently"]
+        OG3["🔑  Scope Confirm\nVerify every result row\nbelongs to this user's caseload\nForeign row → full block + SOC alert"]
+        OG4["📊  Sanity Bounds\nSME-defined Bounds Registry\nwarn vs hard-block thresholds"]
+        OG5["📋  Per-Intent Field Allowlist\nIntent (count/filter/trend/ranking/lookup)\n→ approved-field set\nNon-allowlisted fields stripped"]
+        OG1 --> OG2 --> OG3 --> OG4 --> OG5
+    end
+
+    G1A -- "❌  Out of scope" --> Refused(["Polite Refusal\nReturned to User"])
+    G1B -- "🚨  Injection detected" --> SecurityAlert(["🚨  Security Alert\nSOC Notification\nAudit Log Written"])
+    G1B -- "✅  Safe" --> PipelineGuards
+
+    AG1 -- "🚨  Write op detected" --> HardBlock(["🚫  Hard Block\nSecurity Alert\nAudit Log Written"])
+    AG2 -- "🚨  Scope filter missing" --> HardBlock
+    AG3 -- "🔄  Unknown field" --> Repair(["Pipeline retries once\nvia Translator\nError added to\ntranslation prompt\n(router decision unchanged)"])
+    AG4 -- "⚠️  Too expensive" --> Narrow(["Ask User to\nNarrow Request"])
+    AG4 -- "✅  Passed" --> RunQuery["▶️  Execute Query\nMCP Server  ·  GKE"]
+
+    RunQuery --> Gate2
+
+    OG3 -- "🚨  Out-of-scope row" --> ScopeBlock(["🚫  Result Blocked\nUser Notified  ·  SOC Alert"])
+    OG5 -- "✅  All checks passed" --> SafeAnswer(["✅  Safe Answer\nDelivered to User"])
+    OG4 -- "⚠️  Value outside typical range\nbut within hard limits" --> WarnAnswer(["⚠️  Answer Delivered\nwith Warning Banner\nVerify with source report"])
+    OG4 -- "❌  Value outside hard limits" --> HardBoundsBlock(["🚫  Result Blocked\nValue unreliable"])
+
+    classDef gateStyle fill:#FFFAE6,stroke:#FF8B00,color:#172B4D
+    classDef agentStyle fill:#EAE6FF,stroke:#5243AA,color:#172B4D
+    classDef processStyle fill:#EBF2FF,stroke:#0052CC,color:#172B4D
+    classDef successStyle fill:#E3FCEF,stroke:#00875A,color:#172B4D
+    classDef errorStyle fill:#FFEBE6,stroke:#DE350B,color:#172B4D
+    classDef warnStyle fill:#FFFAE6,stroke:#FF8B00,color:#172B4D
+
+    class Gate1,Gate2 gateStyle
+    class PipelineGuards,AG1,AG2,AG3,AG4,AG5 agentStyle
+    class G1A,G1B,G1C,OG1,OG2,OG3,OG4,OG5 processStyle
+    class SafeAnswer successStyle
+    class Refused,SecurityAlert,HardBlock,ScopeBlock,HardBoundsBlock errorStyle
+    class Repair,Narrow,WarnAnswer warnStyle
+    class RunQuery processStyle
+    class Incoming successStyle
